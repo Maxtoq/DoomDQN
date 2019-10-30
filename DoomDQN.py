@@ -17,12 +17,44 @@ class DQNetwork(nn.Module):
     def __init__(self):
         super(DQNetwork, self).__init__()
         """
-            First ConvNet:
-            CNN
+            First Convolutional layer:
+            Conv2d: Output size = [(Input size - Kernel size + 2 * Padding) / Stride] + 1
+                => 
             BatchNormalization
-            ELU
         """
-        self.conv1 = nn.Conv2d(4, )
+        self.conv1 = nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=2)
+        self.batchnorm1 = nn.BatchNorm2d(num_features=32)
+
+        """
+            Second Convolutional layer:
+            Conv2d
+            BatchNormalization
+        """
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
+        self.batchnorm2 = nn.BatchNorm2d(num_features=64)
+
+        """
+            Third Convolutional layer:
+            Conv2d
+            BatchNormalization
+        """
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2)
+        self.batchnorm3 = nn.BatchNorm2d(num_features=128)
+
+        """
+            First Fully Connected layer:
+
+        """
+
+    def forward(self, x):
+        # First Convolutional layer with ELU activation
+        x = F.elu(self.batchnorm1(self.conv1(x)))
+
+        # Second Convolutional layer with ELU activation
+        x = F.elu(self.batchnorm2(self.conv2(x)))
+
+        # Third Convolutional layer with ELU activation
+        x = F.elu(self.batchnorm3(self.conv3(x)))
 
 
 class DQLAgent():
