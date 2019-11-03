@@ -1,4 +1,5 @@
 import random
+import torch
 import time
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import torch.nn as nn
 import vizdoom as vzd
 import numpy as np
 
+from torch.autograd import Variable
 from skimage import transform
 from collections import deque
 from PIL import Image
@@ -18,8 +20,8 @@ class DQNetwork(nn.Module):
         super(DQNetwork, self).__init__()
         """
             First Convolutional layer:
-            Conv2d: Output size = [(Input size - Kernel size + 2 * Padding) / Stride] + 1
-                => 
+            Conv2d: Widht = [(Input width - Kernel width + 2 * Padding) / Stride] + 1
+                => [(84 - 8 + 0) / 2] + 1 = 39 => 39 x 39 x 32
             BatchNormalization
         """
         self.conv1 = nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=2)
@@ -27,7 +29,7 @@ class DQNetwork(nn.Module):
 
         """
             Second Convolutional layer:
-            Conv2d
+            Conv2d: Output => [(38 - 4 + 0) / 2] + 1 = 18 => 18 x 18 x 64
             BatchNormalization
         """
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
@@ -35,7 +37,7 @@ class DQNetwork(nn.Module):
 
         """
             Third Convolutional layer:
-            Conv2d
+            Conv2d: Output => [(18 - 4 + 0) / 2] + 1 = 8 => 8 x 8 x 128
             BatchNormalization
         """
         self.conv3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2)
@@ -43,8 +45,14 @@ class DQNetwork(nn.Module):
 
         """
             First Fully Connected layer:
+            Input size = 8 x 8 x 128 = 8192
+        """
+        self.fc1 = nn.Linear(in_features=8192, out_features=512)
 
         """
+            Second Fully Connected layer = Output Layer
+        """
+        self.out = nn.Linear(in_features=512, out_features=3)
 
     def forward(self, x):
         # First Convolutional layer with ELU activation
@@ -56,40 +64,47 @@ class DQNetwork(nn.Module):
         # Third Convolutional layer with ELU activation
         x = F.elu(self.batchnorm3(self.conv3(x)))
 
+        # Flatten the output of the convolution
+        x = x.view(-1, 8192)
 
-class DQLAgent():
+        # First Fully Connected layer with ELU activation
+        x = F.elu(self.fc1(x))
 
-    def __init__(self):
-        self.dqn = DQNetwork()        
-
-    def choose_action(self, frames):
-        return [0, 0, 1]
+        # Output with the second fully connected layer
+        return self.out(x)
 
 
-class DoomEnv():
+class DoomDQNAgent():
     
     RESIZED_SIZE = (84, 84)
 
     def __init__(self):
+        # Deep Q Learning agent
+        # Deep Q Network
+        self.dqn = DQNetwork()
+        # Loss
+        self.loss = nn.CrossEntropyLoss()
+        # Learning rate
+        self.lr = 0.01
+        # Optimizer
+        self.optimizer = torch.optim.Adam(self.dqn.parameters(), lr=self.lr)
+        # Exploration rate
+        self.eps = 0.001
+        self.eps_step = 0.0001
+        
+        # Initialize the game environment
         # Create the environment
         self.game = vzd.DoomGame()
-
-        # DQN
-        self.dql_agent = DQLAgent()
-        
         # Load the config
         self.game.load_config('basic.cfg')
-        
         # Load the scenario
         self.game.set_doom_scenario_path('basic.wad')
         self.game.init()
         self.screen_size = (self.game.get_screen_width(), self.game.get_screen_height())
-        
         # Create possible actions [left, right, shoot]
         self.actions = [[1, 0, 0],
                         [0, 1, 0],
                         [0, 0, 1]]
-        
         # Number of tics we skip for each action
         self.skip_rate = 4
 
@@ -111,7 +126,7 @@ class DoomEnv():
         normed = cropped / 255.0
 
         # Resize
-        resized = transform.resize(normed, list(DoomEnv.RESIZED_SIZE))
+        resized = transform.resize(normed, list(DoomDQNAgent.RESIZED_SIZE))
         
         return resized
 
@@ -123,6 +138,28 @@ class DoomEnv():
         else:
             # Append the new frame to deque
             self.frame_deque.append(frame)
+
+    def get_q_values(self, state):
+        state = torch.from_numpy(state)
+        state = Variable(state)
+        return self.dqn.forward(state)
+
+    def choose_action(self, frames):
+        # Perform Epsilon-Greedy Policy
+        if random.random() > self.eps:
+            # Perform Exploration
+            a = random.randint(0, len(self.actions) - 1)
+        else:
+            # Perform Exploitation
+            q_values = self.get_q_values(frames)
+            a = int(torch.argmax(q_values))
+        self.eps += self.eps_step
+
+        return self.actions[a]
+
+    def learning_step(self, state, action, reward, new_state):
+        """ Compute Q-target and update parameters. """
+        
     
     def run_game(self, nb_episode=1):
         for i in range(nb_episode):
@@ -130,29 +167,40 @@ class DoomEnv():
             self.game.new_episode()
             
             while not self.game.is_episode_finished():
-                state = self.game.get_state()
+                game_state = self.game.get_state()
                 
                 # Get image and preprocess it
-                frame = state.screen_buffer
+                frame = game_state.screen_buffer
                 preproc_frame = self.preprocess_frame(frame)
 
                 # Stack the preprocessed frame
                 self.stack_frame(preproc_frame)
+                state = np.array(self.frame_deque)
                 
                 # Choose an action
-                #action = random.choice(self.actions)
-                action = self.dql_agent.choose_action(np.array(self.frame_deque))
+                action = self.choose_action(state)
                 print(action)
                 
+                # Make action and get reward
                 reward = self.game.make_action(action, self.skip_rate)
                 print ("\treward:", reward)
+
+                # Get new state
+                if not self.game.is_episode_finished():
+                    new_state_frame = self.preprocess(self.game.get_state().screen_buffer)
+                    self.stack_frame(new_state_frame)
+                    new_state = np.array(self.frame_deque)
+                else:
+                    new_state = None
                 
-                time.sleep(0.1)
+                # Perform learning step
+                self.learning_step(state, action, reward, new_state)
+
             print ("Result:", self.game.get_total_reward())
             
         self.game.close()
 
 
 if __name__ == "__main__":
-    d = DoomEnv()
+    d = DoomDQNAgent()
     d.run_game()
