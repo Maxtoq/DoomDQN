@@ -81,11 +81,13 @@ class DoomDQNAgent():
     def __init__(self):
         # Deep Q Learning agent
         # Deep Q Network
-        self.dqn = DQNetwork()
+        self.dqn = DQNetwork().cuda()
         # Loss
-        self.loss = nn.CrossEntropyLoss()
+        self.loss = nn.MSELoss()
         # Learning rate
-        self.lr = 0.01
+        self.lr = 0.001
+        # Discount factor
+        self.dr = 0.9
         # Optimizer
         self.optimizer = torch.optim.Adam(self.dqn.parameters(), lr=self.lr)
         # Exploration rate
@@ -140,18 +142,19 @@ class DoomDQNAgent():
             self.frame_deque.append(frame)
 
     def get_q_values(self, state):
-        state = torch.from_numpy(state)
+        state = torch.from_numpy(state).unsqueeze(0)
+        state = state.type(torch.FloatTensor).cuda()
         state = Variable(state)
-        return self.dqn.forward(state)
+        return self.dqn(state)
 
-    def choose_action(self, frames):
+    def choose_action(self, state):
         # Perform Epsilon-Greedy Policy
         if random.random() > self.eps:
             # Perform Exploration
             a = random.randint(0, len(self.actions) - 1)
         else:
             # Perform Exploitation
-            q_values = self.get_q_values(frames)
+            q_values = self.get_q_values(state)
             a = int(torch.argmax(q_values))
         self.eps += self.eps_step
 
@@ -159,8 +162,30 @@ class DoomDQNAgent():
 
     def learning_step(self, state, action, reward, new_state):
         """ Compute Q-target and update parameters. """
+        if new_state is not None:
+            # Q-target = Reward + discount * maxQ(new_state)
+            # Get maximum Q-value for the next state
+            q2 = np.max(self.get_q_values(new_state).data.cpu().numpy(), axis=1)
+            # Compute Q-values for the current state (in case we performed exploration)
+            q_target = self.get_q_values(state).data.cpu().numpy()
+            # Update to obtain Q-target
+            q_target[0, action] = reward + self.dr * q2
+        else:
+            # Compute Q-values for the current state (in case we performed exploration)
+            q_target = self.get_q_values(state).data.cpu().numpy()
+            # Update to obtain Q-target
+            q_target[0, action] = reward
         
-    
+        # Execute Learning step
+        q_target = Variable(torch.from_numpy(q_target).cuda())
+        output = self.get_q_values(state)
+        loss = self.loss(output, q_target)
+        # Reinitialize gradients
+        self.optimizer.zero_grad()
+        # Compute gradients and update parameters
+        loss.backward()
+        self.optimizer.step()
+
     def run_game(self, nb_episode=1):
         for i in range(nb_episode):
             # Start new episode
@@ -187,7 +212,7 @@ class DoomDQNAgent():
 
                 # Get new state
                 if not self.game.is_episode_finished():
-                    new_state_frame = self.preprocess(self.game.get_state().screen_buffer)
+                    new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
                     self.stack_frame(new_state_frame)
                     new_state = np.array(self.frame_deque)
                 else:
