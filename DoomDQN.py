@@ -14,6 +14,10 @@ from collections import deque
 from PIL import Image
 
 
+def plot_list(l, legend):
+    plt.plot(np.arange(len(l)), l, label=legend)
+    plt.legend()
+
 class DQNetwork(nn.Module):
 
     def __init__(self):
@@ -74,6 +78,27 @@ class DQNetwork(nn.Module):
         return self.out(x)
 
 
+class ReplayMemory():
+
+    def __init__(self, max_size=1000000):
+        self.buffer = deque(maxlen=max_size)
+
+    def store(self, exp):
+        self.buffer.append(exp)
+
+    def sample(self, batch_size):
+        buffer_size = len(self.buffer)
+
+        if buffer_size < batch_size:
+            batch_size = buffer_size
+            print(f'Not enough experience stored, returning only {batch_size} experiences.')
+
+        # Get random ids in the buffer
+        ids = np.random.choice(buffer_size, size=batch_size, replace=False)
+
+        return [self.buffer[i] for i in ids]
+
+
 class DoomDQNAgent():
     
     RESIZED_SIZE = (84, 84)
@@ -90,9 +115,6 @@ class DoomDQNAgent():
         self.dr = 0.9
         # Optimizer
         self.optimizer = torch.optim.Adam(self.dqn.parameters(), lr=self.lr)
-        # Exploration rate
-        self.eps = 0.001
-        self.eps_step = 0.0001
         
         # Initialize the game environment
         # Create the environment
@@ -110,9 +132,21 @@ class DoomDQNAgent():
         # Number of tics we skip for each action
         self.skip_rate = 4
 
+        # Replay Memory
+        self.memory = ReplayMemory()
+
         # Stack of 4 frames
         self.max_len = 4
         self.frame_deque = None
+
+        # Historic of metrics
+        self.hist_loss = []
+        self.hist_reward = []
+
+    def display_metrics(self):
+        plot_list(self.hist_loss, 'Loss')
+        plot_list(self.hist_reward, 'Reward')
+        plt.show()        
         
     def preprocess_frame(self, frame):
         # Grayscale the frame
@@ -147,85 +181,106 @@ class DoomDQNAgent():
         state = Variable(state)
         return self.dqn(state)
 
-    def choose_action(self, state):
+    def choose_action(self, state, nb_epoch=None, i=None):
+        # Compute Epsilon
+        if nb_epoch is None:
+            eps = 1
+        else:
+            eps = (i / nb_epoch) * 0.9
+
         # Perform Epsilon-Greedy Policy
-        if random.random() > self.eps:
+        if random.random() > eps:
             # Perform Exploration
             a = random.randint(0, len(self.actions) - 1)
         else:
             # Perform Exploitation
             q_values = self.get_q_values(state)
             a = int(torch.argmax(q_values))
-        self.eps += self.eps_step
 
         return self.actions[a]
 
-    def learning_step(self, state, action, reward, new_state):
+    def learning_step(self):
         """ Compute Q-target and update parameters. """
-        if new_state is not None:
-            # Q-target = Reward + discount * maxQ(new_state)
-            # Get maximum Q-value for the next state
-            q2 = np.max(self.get_q_values(new_state).data.cpu().numpy(), axis=1)
-            # Compute Q-values for the current state (in case we performed exploration)
-            q_target = self.get_q_values(state).data.cpu().numpy()
-            # Update to obtain Q-target
-            q_target[0, action] = reward + self.dr * q2
-        else:
-            # Compute Q-values for the current state (in case we performed exploration)
-            q_target = self.get_q_values(state).data.cpu().numpy()
-            # Update to obtain Q-target
-            q_target[0, action] = reward
+        # if new_state is not None:
+        #     # Q-target = Reward + discount * maxQ(new_state)
+        #     # Get maximum Q-value for the next state
+        #     q2 = np.max(self.get_q_values(new_state).data.cpu().numpy(), axis=1)
+        #     # Compute Q-values for the current state (in case we performed exploration)
+        #     q_target = self.get_q_values(state).data.cpu().numpy()
+        #     # Update to obtain Q-target
+        #     q_target[0, action] = reward + self.dr * q2
+        # else:
+        #     # Compute Q-values for the current state (in case we performed exploration)
+        #     q_target = self.get_q_values(state).data.cpu().numpy()
+        #     # Update to obtain Q-target
+        #     q_target[0, action] = reward
         
-        # Execute Learning step
-        q_target = Variable(torch.from_numpy(q_target).cuda())
-        output = self.get_q_values(state)
-        loss = self.loss(output, q_target)
-        # Reinitialize gradients
-        self.optimizer.zero_grad()
-        # Compute gradients and update parameters
-        loss.backward()
-        self.optimizer.step()
+        # # Execute Learning step
+        # q_target = Variable(torch.from_numpy(q_target).cuda())
+        # output = self.get_q_values(state)
+        # loss = self.loss(output, q_target)
+        # # Reinitialize gradients
+        # self.optimizer.zero_grad()
+        # # Compute gradients and update parameters
+        # loss.backward()
+        # self.optimizer.step()
 
-    def run_game(self, nb_episode=1):
-        for i in range(nb_episode):
-            # Start new episode
-            self.game.new_episode()
-            
-            while not self.game.is_episode_finished():
-                game_state = self.game.get_state()
-                
-                # Get image and preprocess it
-                frame = game_state.screen_buffer
-                preproc_frame = self.preprocess_frame(frame)
+        # return float(loss)
 
-                # Stack the preprocessed frame
-                self.stack_frame(preproc_frame)
-                state = np.array(self.frame_deque)
-                
-                # Choose an action
-                action = self.choose_action(state)
-                print(action)
-                
-                # Make action and get reward
-                reward = self.game.make_action(action, self.skip_rate)
-                print ("\treward:", reward)
+    def run_train(self, nb_epoch=100, nb_episodes=20):
+        for i in range(nb_epoch):
+            # Gather experiences playing
+            for j in range(nb_episodes):
+                # Start new episode
+                self.game.new_episode()
 
-                # Get new state
-                if not self.game.is_episode_finished():
-                    new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
-                    self.stack_frame(new_state_frame)
-                    new_state = np.array(self.frame_deque)
-                else:
-                    new_state = None
+                # Create new hist loss for this episode
+                loss = 0
                 
-                # Perform learning step
-                self.learning_step(state, action, reward, new_state)
+                while not self.game.is_episode_finished():
+                    game_state = self.game.get_state()
+                    
+                    # Get image and preprocess it
+                    frame = game_state.screen_buffer
+                    preproc_frame = self.preprocess_frame(frame)
 
-            print ("Result:", self.game.get_total_reward())
+                    # Stack the preprocessed frame
+                    self.stack_frame(preproc_frame)
+                    state = np.array(self.frame_deque)
+                    
+                    # Choose an action
+                    action = self.choose_action(state, nb_epoch, i + 1)
+                    
+                    # Make action and get reward
+                    reward = self.game.make_action(action, self.skip_rate)
+
+                    # Get new state
+                    if not self.game.is_episode_finished():
+                        new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
+                        self.stack_frame(new_state_frame)
+                        new_state = np.array(self.frame_deque)
+                    else:
+                        new_state = None
+                    
+                    # Store experience in Replay memory
+                    self.replay_memory.store((state, action, reward, new_state))
+            #     # Perform learning step
+            #     loss = self.learning_step(state, action, reward, new_state)
+
+            # # Add hist data
+            # self.hist_loss.append(loss)
+            # self.hist_reward.append(self.game.get_total_reward())
+
+            # Perform learning step
+            self.learning_step()
+
+            print (f"Ep #{i} Result:", self.hist_reward[-1])
             
         self.game.close()
+
+        self.display_metrics()
 
 
 if __name__ == "__main__":
     d = DoomDQNAgent()
-    d.run_game()
+    d.run_train()
