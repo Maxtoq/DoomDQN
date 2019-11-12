@@ -134,6 +134,8 @@ class DoomDQNAgent():
 
         # Replay Memory
         self.memory = ReplayMemory()
+        # Batch size when learning
+        self.batch_size = 64
 
         # Stack of 4 frames
         self.max_len = 4
@@ -176,7 +178,9 @@ class DoomDQNAgent():
             self.frame_deque.append(frame)
 
     def get_q_values(self, state):
-        state = torch.from_numpy(state).unsqueeze(0)
+        state = torch.from_numpy(state)
+        if len(state.shape) == 3:
+            state = state.unsqueeze(0)
         state = state.type(torch.FloatTensor).cuda()
         state = Variable(state)
         return self.dqn(state)
@@ -200,30 +204,43 @@ class DoomDQNAgent():
         return self.actions[a]
 
     def learning_step(self):
-        """ Compute Q-target and update parameters. """
-        # if new_state is not None:
-        #     # Q-target = Reward + discount * maxQ(new_state)
-        #     # Get maximum Q-value for the next state
-        #     q2 = np.max(self.get_q_values(new_state).data.cpu().numpy(), axis=1)
-        #     # Compute Q-values for the current state (in case we performed exploration)
-        #     q_target = self.get_q_values(state).data.cpu().numpy()
-        #     # Update to obtain Q-target
-        #     q_target[0, action] = reward + self.dr * q2
-        # else:
-        #     # Compute Q-values for the current state (in case we performed exploration)
-        #     q_target = self.get_q_values(state).data.cpu().numpy()
-        #     # Update to obtain Q-target
-        #     q_target[0, action] = reward
-        
-        # # Execute Learning step
-        # q_target = Variable(torch.from_numpy(q_target).cuda())
-        # output = self.get_q_values(state)
-        # loss = self.loss(output, q_target)
-        # # Reinitialize gradients
-        # self.optimizer.zero_grad()
-        # # Compute gradients and update parameters
-        # loss.backward()
-        # self.optimizer.step()
+        """ Perform a learning step using a batch from the replay memory. """
+        batch = self.memory.sample(self.batch_size)
+
+        states_b = np.array([each[0] for each in batch], ndmin=3)
+        actions_b = np.array([each[1] for each in batch])
+        rewards_b = np.array([each[2] for each in batch]) 
+        new_states_b = np.array([each[3] for each in batch], ndmin=3)
+
+        # Get Q-values of next states
+        next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
+
+        q_targets_b = []
+
+        for i in range(len(batch)):
+            if new_states_b[i] is not None:
+                # Q-target = Reward + discount * maxQ(new_state)
+                # Get maximum Q-value for the next state
+                q2 = np.max(next_qs_b[i])
+                # Compute Q-values for the current state (in case we performed exploration)
+                q_target = self.get_q_values(state).data.cpu().numpy()
+                # Update to obtain Q-target
+                q_target[0, action] = reward + self.dr * q2
+            else:
+                # Compute Q-values for the current state (in case we performed exploration)
+                q_target = self.get_q_values(state).data.cpu().numpy()
+                # Update to obtain Q-target
+                q_target[0, action] = reward
+            
+            # Execute Learning step
+            q_target = Variable(torch.from_numpy(q_target).cuda())
+            output = self.get_q_values(state)
+            loss = self.loss(output, q_target)
+            # Reinitialize gradients
+            self.optimizer.zero_grad()
+            # Compute gradients and update parameters
+            loss.backward()
+            self.optimizer.step()
 
         # return float(loss)
 
