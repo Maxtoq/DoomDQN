@@ -173,11 +173,14 @@ class DoomDQNAgent():
         if self.frame_deque is None:
             # Stack the frame four times
             self.frame_deque = deque([frame, ] * self.max_len, maxlen=self.max_len)
+            for i in range(self.max_len):
+                self.frame_deque.append(frame)
         else:
             # Append the new frame to deque
             self.frame_deque.append(frame)
 
     def get_q_values(self, state):
+        state = np.array(state)
         state = torch.from_numpy(state)
         if len(state.shape) == 3:
             state = state.unsqueeze(0)
@@ -206,23 +209,31 @@ class DoomDQNAgent():
     def learning_step(self):
         """ Perform a learning step using a batch from the replay memory. """
         batch = self.memory.sample(self.batch_size)
-
+        if len(batch) < self.batch_size:
+            print('Not enough samples to train, returning.')
+            return None
+        
         states_b = np.array([each[0] for each in batch], ndmin=3)
         actions_b = np.array([each[1] for each in batch])
         rewards_b = np.array([each[2] for each in batch]) 
         new_states_b = np.array([each[3] for each in batch], ndmin=3)
+        print(actions_b, rewards_b)
+        print(new_states_b)
+        print(states_b.shape, new_states_b.shape)
 
-        # Get Q-values of next states
-        next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
+        # # Get Q-values of next states
+        # next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
 
         # Initialize Q-targets as Q-values for the current state
         q_targets_b = self.get_q_values(states_b).data.cpu().numpy()
 
         for i in range(len(batch)):
             if new_states_b[i] is not None:
+                # Get Q-values of next states
+                next_qs = self.get_q_values(new_states_b[i]).data.cpu().numpy()
                 # Q-target = Reward + discount * maxQ(new_state)
                 # Get maximum Q-value for the next state
-                q2 = np.max(next_qs_b[i])
+                q2 = np.max(next_qs)
                 # Update to obtain Q-target
                 q_targets_b[i, action] = rewards_b[i] + self.dr * q2
             else:
@@ -241,54 +252,50 @@ class DoomDQNAgent():
 
         return float(torch.mean(loss))
 
-    def run_train(self, nb_epoch=100, nb_episodes=20):
+    def run_train(self, nb_epoch=2000):
         for i in range(nb_epoch):
-            # Gather experiences playing
-            for j in range(nb_episodes):
-                # Start new episode
-                self.game.new_episode()
+            # Start new episode
+            self.game.new_episode()
 
-                # Create new hist loss for this episode
-                loss = 0
+            # Create new hist loss for this episode
+            loss = 0
+            
+            while not self.game.is_episode_finished():
+                game_state = self.game.get_state()
                 
-                while not self.game.is_episode_finished():
-                    game_state = self.game.get_state()
-                    
-                    # Get image and preprocess it
-                    frame = game_state.screen_buffer
-                    preproc_frame = self.preprocess_frame(frame)
+                # Get image and preprocess it
+                frame = game_state.screen_buffer
+                preproc_frame = self.preprocess_frame(frame)
 
-                    # Stack the preprocessed frame
-                    self.stack_frame(preproc_frame)
-                    state = np.array(self.frame_deque)
-                    
-                    # Choose an action
-                    action = self.choose_action(state, nb_epoch, i + 1)
-                    
-                    # Make action and get reward
-                    reward = self.game.make_action(action, self.skip_rate)
+                # Stack the preprocessed frame
+                self.stack_frame(preproc_frame)
+                state = np.asarray(self.frame_deque)
+                
+                # Choose an action
+                action = self.choose_action(state, nb_epoch, i + 1)
+                
+                # Make action and get reward
+                reward = self.game.make_action(action, self.skip_rate)
 
-                    # Get new state
-                    if not self.game.is_episode_finished():
-                        new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
-                        self.stack_frame(new_state_frame)
-                        new_state = np.array(self.frame_deque)
-                    else:
-                        new_state = None
-                    
-                    # Store experience in Replay memory
-                    self.replay_memory.store((state, action, reward, new_state))
-            #     # Perform learning step
-            #     loss = self.learning_step(state, action, reward, new_state)
-
-            # # Add hist data
-            # self.hist_loss.append(loss)
-            # self.hist_reward.append(self.game.get_total_reward())
+                # Get new state
+                if not self.game.is_episode_finished():
+                    new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
+                    self.stack_frame(new_state_frame)
+                    new_state = np.asarray(self.frame_deque)
+                else:
+                    new_state = None
+                
+                # Store experience in Replay memory
+                self.memory.store((state, action, reward, new_state))
 
             # Perform learning step
-            self.learning_step()
+            loss = self.learning_step()
 
-            print (f"Ep #{i} Result:", self.hist_reward[-1])
+            # Add hist data
+            if loss:
+                self.hist_loss.append(loss)
+            self.hist_reward.append(self.game.get_total_reward())
+            print (f"Ep #{i + 1} Result:", self.hist_reward[-1])
             
         self.game.close()
 
