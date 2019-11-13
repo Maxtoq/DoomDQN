@@ -215,34 +215,31 @@ class DoomDQNAgent():
         # Get Q-values of next states
         next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
 
-        q_targets_b = []
+        # Initialize Q-targets as Q-values for the current state
+        q_targets_b = self.get_q_values(states_b).data.cpu().numpy()
 
         for i in range(len(batch)):
             if new_states_b[i] is not None:
                 # Q-target = Reward + discount * maxQ(new_state)
                 # Get maximum Q-value for the next state
                 q2 = np.max(next_qs_b[i])
-                # Compute Q-values for the current state (in case we performed exploration)
-                q_target = self.get_q_values(state).data.cpu().numpy()
                 # Update to obtain Q-target
-                q_target[0, action] = reward + self.dr * q2
+                q_targets_b[i, action] = rewards_b[i] + self.dr * q2
             else:
-                # Compute Q-values for the current state (in case we performed exploration)
-                q_target = self.get_q_values(state).data.cpu().numpy()
                 # Update to obtain Q-target
-                q_target[0, action] = reward
+                q_targets_b[i, action] = rewards_b[i]
             
-            # Execute Learning step
-            q_target = Variable(torch.from_numpy(q_target).cuda())
-            output = self.get_q_values(state)
-            loss = self.loss(output, q_target)
-            # Reinitialize gradients
-            self.optimizer.zero_grad()
-            # Compute gradients and update parameters
-            loss.backward()
-            self.optimizer.step()
+        # Execute Learning step
+        q_targets_b = Variable(torch.from_numpy(q_targets_b).cuda())
+        outputs_b = self.get_q_values(states_b)
+        loss = self.loss(outputs_b, q_targets_b)
+        # Reinitialize gradients
+        self.optimizer.zero_grad()
+        # Compute gradients and update parameters
+        loss.backward()
+        self.optimizer.step()
 
-        # return float(loss)
+        return float(torch.mean(loss))
 
     def run_train(self, nb_epoch=100, nb_episodes=20):
         for i in range(nb_epoch):
