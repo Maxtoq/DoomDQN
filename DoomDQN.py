@@ -80,7 +80,7 @@ class DQNetwork(nn.Module):
 
 class ReplayMemory():
 
-    def __init__(self, max_size=1000000):
+    def __init__(self, max_size=10000):
         self.buffer = deque(maxlen=max_size)
 
     def store(self, exp):
@@ -110,9 +110,9 @@ class DoomDQNAgent():
         # Loss
         self.loss = nn.MSELoss()
         # Learning rate
-        self.lr = 0.001
+        self.lr = 0.0005
         # Discount factor
-        self.dr = 0.9
+        self.dr = 0.98
         # Optimizer
         self.optimizer = torch.optim.Adam(self.dqn.parameters(), lr=self.lr)
         
@@ -147,7 +147,7 @@ class DoomDQNAgent():
 
     def display_metrics(self):
         plot_list(self.hist_loss, 'Loss')
-        plot_list(self.hist_reward, 'Reward')
+        # plot_list(self.hist_reward, 'Reward')
         plt.show()        
         
     def preprocess_frame(self, frame):
@@ -156,9 +156,9 @@ class DoomDQNAgent():
 
         # Crop the frame
         if self.screen_size == (1920, 1080):
-            cropped = gray[400:-300, 160:-160]
+            cropped = gray[400:-300, 30:-30]
         elif self.screen_size == (320, 240):
-            cropped = gray[80:-33, 30:-30]
+            cropped = gray[80:-33, 10:-10]
 
         # Normalise pixel values
         normed = cropped / 255.0
@@ -217,28 +217,26 @@ class DoomDQNAgent():
         actions_b = np.array([each[1] for each in batch])
         rewards_b = np.array([each[2] for each in batch]) 
         new_states_b = np.array([each[3] for each in batch], ndmin=3)
-        print(actions_b, rewards_b)
-        print(new_states_b)
-        print(states_b.shape, new_states_b.shape)
+        is_terminals_b = np.array([each[4] for each in batch])
 
-        # # Get Q-values of next states
-        # next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
+        # Get Q-values of next states
+        next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
 
         # Initialize Q-targets as Q-values for the current state
         q_targets_b = self.get_q_values(states_b).data.cpu().numpy()
 
         for i in range(len(batch)):
-            if new_states_b[i] is not None:
-                # Get Q-values of next states
-                next_qs = self.get_q_values(new_states_b[i]).data.cpu().numpy()
+            if not is_terminals_b[i]:
                 # Q-target = Reward + discount * maxQ(new_state)
                 # Get maximum Q-value for the next state
-                q2 = np.max(next_qs)
+                q2 = np.max(next_qs_b[i])
                 # Update to obtain Q-target
-                q_targets_b[i, action] = rewards_b[i] + self.dr * q2
+                id_action = self.actions.index(list(actions_b[i]))
+                q_targets_b[i, id_action] = rewards_b[i] + self.dr * q2
             else:
                 # Update to obtain Q-target
-                q_targets_b[i, action] = rewards_b[i]
+                id_action = self.actions.index(list(actions_b[i]))
+                q_targets_b[i, id_action] = rewards_b[i]
             
         # Execute Learning step
         q_targets_b = Variable(torch.from_numpy(q_targets_b).cuda())
@@ -282,11 +280,13 @@ class DoomDQNAgent():
                     new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
                     self.stack_frame(new_state_frame)
                     new_state = np.asarray(self.frame_deque)
+                    is_terminal = True
                 else:
-                    new_state = None
+                    new_state = np.zeros((4, 84, 84))
+                    is_terminal = False
                 
                 # Store experience in Replay memory
-                self.memory.store((state, action, reward, new_state))
+                self.memory.store((state, action, reward, new_state, is_terminal))
 
             # Perform learning step
             loss = self.learning_step()
