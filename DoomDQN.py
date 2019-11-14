@@ -250,7 +250,7 @@ class DoomDQNAgent():
 
         return float(torch.mean(loss))
 
-    def run_train(self, nb_epoch=2000):
+    def run_train(self, nb_epoch=3000):
         for i in range(nb_epoch):
             # Start new episode
             self.game.new_episode()
