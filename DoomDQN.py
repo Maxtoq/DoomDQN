@@ -1,3 +1,4 @@
+import argparse
 import random
 import torch
 import time
@@ -12,6 +13,9 @@ from torch.autograd import Variable
 from skimage import transform
 from collections import deque
 from PIL import Image
+
+
+CHECKPOINT_PATH = './checkpoint/model_cp.pth'
 
 
 def plot_list(l, legend):
@@ -103,7 +107,7 @@ class DoomDQNAgent():
     
     RESIZED_SIZE = (84, 84)
 
-    def __init__(self):
+    def __init__(self, load=False):
         # Deep Q Learning agent
         # Deep Q Network
         self.dqn = DQNetwork().cuda()
@@ -145,10 +149,21 @@ class DoomDQNAgent():
         self.hist_loss = []
         self.hist_reward = []
 
+        # Epoch we're at
+        self.epoch = 0
+
+        # Load state dict model if wanted
+        if load:
+            checkpoint = torch.load(CHECKPOINT_PATH)
+            self.epoch = checkpoint['epoch']
+            self.dqn.load_state_dict(checkpoint['dqn_state_dict'])
+            self.optimizer.load_state_sict(checkpoint['optimizer_state_dict'])
+            self.hist_loss = checkpoint['hist_loss']
+
     def display_metrics(self):
         plot_list(self.hist_loss, 'Loss')
         # plot_list(self.hist_reward, 'Reward')
-        plt.show()        
+        plt.show()      
         
     def preprocess_frame(self, frame):
         # Grayscale the frame
@@ -251,7 +266,7 @@ class DoomDQNAgent():
         return float(torch.mean(loss))
 
     def run_train(self, nb_epoch=3000):
-        for i in range(nb_epoch):
+        for i in range(self.epoch, self.epoch + nb_epoch):
             # Start new episode
             self.game.new_episode()
 
@@ -301,7 +316,21 @@ class DoomDQNAgent():
 
         self.display_metrics()
 
+        # Save checkpoint
+        torch.save({
+            'epoch': i,
+            'dqn_state_dict': self.dqn.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'hist_loss': self.hist_loss
+        }, CHECKPOINT_PATH)
+
 
 if __name__ == "__main__":
-    d = DoomDQNAgent()
+    parser = argparse.ArgumentParser(description='DoomDQN')
+    parser.add_argument('-l', '--load', help='load a model from a checkpoint file',
+                        action='store_true', default=False)
+    args = parser.parse_args()
+    load = args.l
+
+    d = DoomDQNAgent(load)
     d.run_train()
