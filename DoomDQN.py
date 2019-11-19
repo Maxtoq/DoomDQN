@@ -114,7 +114,7 @@ class DoomDQNAgent():
         # Loss
         self.loss = nn.MSELoss()
         # Learning rate
-        self.lr = 0.0005
+        self.lr = 0.0008
         # Discount factor
         self.dr = 0.98
         # Optimizer
@@ -157,7 +157,7 @@ class DoomDQNAgent():
             checkpoint = torch.load(CHECKPOINT_PATH)
             self.epoch = checkpoint['epoch']
             self.dqn.load_state_dict(checkpoint['dqn_state_dict'])
-            self.optimizer.load_state_sict(checkpoint['optimizer_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.hist_loss = checkpoint['hist_loss']
 
     def display_metrics(self):
@@ -330,7 +330,7 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--load', help='load a model from a checkpoint file',
                         action='store_true', default=False)
     args = parser.parse_args()
-    load = args.l
+    load = args.load
 
     d = DoomDQNAgent(load)
     d.run_train()
