@@ -265,7 +265,9 @@ class DoomDQNAgent():
 
         return float(torch.mean(loss))
 
-    def run_train(self, nb_epoch=3000):
+    def run_train(self, nb_epoch=3000, tau_update=32):
+        # Target update
+        t_update = 0
         for i in range(self.epoch, self.epoch + nb_epoch):
             # Start new episode
             self.game.new_episode()
@@ -305,6 +307,12 @@ class DoomDQNAgent():
 
             # Perform learning step
             loss = self.learning_step()
+
+            # Update target network if tau is reached
+            t_update += 1
+            if t_update == tau_update:
+                t_update = 0
+                self.target_dqn.load_state_dict(self.dqn.state_dict())
 
             # Add hist data
             if loss:
