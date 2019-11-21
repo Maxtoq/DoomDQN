@@ -160,6 +160,10 @@ class DoomDQNAgent():
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.hist_loss = checkpoint['hist_loss']
 
+        # Target Q-Network
+        self.target_dqn = DQNetwork().cuda()
+        self.target_dqn.load_state_dict(self.dqn.state_dict())
+
     def display_metrics(self):
         plot_list(self.hist_loss, 'Loss')
         # plot_list(self.hist_reward, 'Reward')
@@ -194,14 +198,17 @@ class DoomDQNAgent():
             # Append the new frame to deque
             self.frame_deque.append(frame)
 
-    def get_q_values(self, state):
+    def get_q_values(self, state, target=False):
         state = np.array(state)
         state = torch.from_numpy(state)
         if len(state.shape) == 3:
             state = state.unsqueeze(0)
         state = state.type(torch.FloatTensor).cuda()
         state = Variable(state)
-        return self.dqn(state)
+        if not target:
+            return self.dqn(state)
+        else:
+            return self.target_dqn(state)
 
     def choose_action(self, state, nb_epoch=None, i=None):
         # Compute Epsilon
@@ -235,10 +242,10 @@ class DoomDQNAgent():
         is_terminals_b = np.array([each[4] for each in batch])
 
         # Get Q-values of next states
-        next_qs_b = self.get_q_values(new_states_b).data.cpu().numpy()
+        next_qs_b = self.get_q_values(new_states_b, target=True).data.cpu().numpy()
 
         # Initialize Q-targets as Q-values for the current state
-        q_targets_b = self.get_q_values(states_b).data.cpu().numpy()
+        q_targets_b = self.get_q_values(states_b, target=True).data.cpu().numpy()
 
         for i in range(len(batch)):
             if not is_terminals_b[i]:
