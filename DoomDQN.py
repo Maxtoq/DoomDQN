@@ -124,9 +124,9 @@ class DoomDQNAgent():
         # Create the environment
         self.game = vzd.DoomGame()
         # Load the config
-        self.game.load_config('basic.cfg')
+        self.game.load_config('config/basic.cfg')
         # Load the scenario
-        self.game.set_doom_scenario_path('basic.wad')
+        self.game.set_doom_scenario_path('config/basic.wad')
         self.game.init()
         self.screen_size = (self.game.get_screen_width(), self.game.get_screen_height())
         # Create possible actions [left, right, shoot]
@@ -159,6 +159,7 @@ class DoomDQNAgent():
             self.dqn.load_state_dict(checkpoint['dqn_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.hist_loss = checkpoint['hist_loss']
+            self.hist_reward = checkpoint['hist_reward']
 
         # Target Q-Network
         self.target_dqn = DQNetwork().cuda()
@@ -166,7 +167,8 @@ class DoomDQNAgent():
 
     def display_metrics(self):
         plot_list(self.hist_loss, 'Loss')
-        # plot_list(self.hist_reward, 'Reward')
+        plt.show()
+        plot_list(self.hist_reward, 'Reward')
         plt.show()      
         
     def preprocess_frame(self, frame):
@@ -192,7 +194,7 @@ class DoomDQNAgent():
         if self.frame_deque is None:
             # Stack the frame four times
             self.frame_deque = deque([frame, ] * self.max_len, maxlen=self.max_len)
-            for i in range(self.max_len):
+            for _ in range(self.max_len):
                 self.frame_deque.append(frame)
         else:
             # Append the new frame to deque
@@ -304,10 +306,10 @@ class DoomDQNAgent():
                     new_state_frame = self.preprocess_frame(self.game.get_state().screen_buffer)
                     self.stack_frame(new_state_frame)
                     new_state = np.asarray(self.frame_deque)
-                    is_terminal = True
+                    is_terminal = False
                 else:
                     new_state = np.zeros((4, 84, 84))
-                    is_terminal = False
+                    is_terminal = True
                 
                 # Store experience in Replay memory
                 self.memory.store((state, action, reward, new_state, is_terminal))
@@ -336,7 +338,8 @@ class DoomDQNAgent():
             'epoch': i,
             'dqn_state_dict': self.dqn.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'hist_loss': self.hist_loss
+            'hist_loss': self.hist_loss,
+            'hist_reward': self.hist_reward
         }, CHECKPOINT_PATH)
 
 
@@ -344,8 +347,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DoomDQN')
     parser.add_argument('-l', '--load', help='load a model from a checkpoint file',
                         action='store_true', default=False)
+    parser.add_argument('-e', '--n_epochs', help='number of epochs to perform',
+                        type=int, default=3000)
     args = parser.parse_args()
     load = args.load
+    n_epochs = args.n_epochs
 
     d = DoomDQNAgent(load)
-    d.run_train()
+    d.run_train(n_epochs)
