@@ -25,7 +25,13 @@ The first step was to build a simple DQN agent with experience replay. With this
 
 (Training during 3000 episodes, using a batch of 256 experiences for each learning step).
 
-We see that in 3000 episodes, the agent manages to improve both its loss and rewards. However the training is quite noisy and the agent still perform a bit poorly during some episodes. Let's see if we can improve the training process!
+We see that in 3000 episodes, the agent manages to improve both its loss and rewards. However the training is very noisy and the agent is still very unconsistent in its rewards. Let's see if we can improve the training process!
 
-## Next steps
-After reaching good results on the first task, I'll continue the development of this project on more difficult tasks of the Doom environment. Following the Thomas Simonini's tutorials, I'll be implementing Dueling Double DQN, Prioritized Experience Replay, Policy Gradients, A2C and maybe more ! The goal is to create an agent that could complete the entire game of Doom... let's get to work !
+### Double DQN
+We observed that there is a very high variance in training that leads to difficulties in converging to an optimal strategy for the agent. A solution to this problem is to have a **Double DQN**. In addition to the DQN network we have to choose actions, we will add a **Target network** that will be used during the learning steps. The Target network has the exact same architecture than the DQN network and the same initial weights. Every Tau episodes, we copy the weights of the DQN network to update the Target Network. We use the DQN network for choosing the actions we perform. At each learning step, we use the Target network to estimate the error of the agent (Q-targets and Q-values of the next state). 
+
+![AltText](img/loss3000_b256_rm_double.png)
+
+![AltText](img/reward3000_b256_rm_double.png)
+
+The Target network allow us to have a fixed target to aim for. Therefore the training is less noisy and the agent acheive better results on the task.
